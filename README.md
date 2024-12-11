@@ -11,7 +11,7 @@ This code applies knowledge distillation to YOLOv11 from [ultralytics](https://g
 ## 1. Clone the repository  
 Clone the repository using the following command:  
 ```bash
-git clone https://github.com/username/myproject.git
+git clone https://github.com/deeprine/yolov11_Knowledge_Distillation
 ```
    
 ## 2. Install the required libraries  

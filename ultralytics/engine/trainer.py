@@ -190,6 +190,18 @@ class FeatureLoss(nn.Module):
         loss = self.feature_loss(stu_feats, tea_feats)
         return self.loss_weight * loss
 
+def extract_module_pairs(model, layers, role):
+    module_pairs = []
+    for mname, ml in model.named_modules():
+        if mname is not None:
+            name = mname.split(".")
+            # print(f'{role} : ', name)
+            if name[0] == "module":
+                name.pop(0)
+            if len(name) == [4 if role == 'teacher' else 3][0] and name[2 if role == 'teacher' else 1] in layers:
+                if "cv2" in mname:
+                    module_pairs.append(ml)
+    return module_pairs
 
 class Distillation_loss:
     def __init__(self, modeln, modelL, teacher_version='v11l', student_version='v11n', distiller="CWDLoss"):  # model must be de-paralleled
@@ -198,61 +210,38 @@ class Distillation_loss:
         # channels_s=[32,64,128,256,128,64,128,256]
         # channels_t=[128,256,512,512,512,256,512,512]
 
-        # v11 teacher_version에 따른 채널 설정
-        if teacher_version == 'v11n':
-            channels_t = [128, 256, 128, 64, 128, 256]
-        elif teacher_version == 'v11s':
-            channels_t = [256, 512, 256, 128, 256, 512]
-        elif teacher_version == 'v11m':
-            channels_t = [512, 512, 512, 256, 512, 512]
-        elif teacher_version == 'v11l':
-            channels_t = [512, 512, 512, 256, 512, 512]
-        elif teacher_version == 'v11x':
-            channels_t = [768, 768, 768, 384, 768, 768]
-        else:
-            channels_t = [512, 512, 512, 256, 512, 512]
+        # Teacher와 Student의 채널 설정을 위한 매핑
+        channels_map = {
+            'v11': {
+                'n': [128, 256, 128, 64, 128, 256],
+                's': [256, 512, 256, 128, 256, 512],
+                'm': [512, 512, 512, 256, 512, 512],
+                'l': [512, 512, 512, 256, 512, 512],
+                'x': [768, 768, 768, 384, 768, 768],
+                'layers': ['6', '8', '13', '16', '19', '22']
+            },
+            'v8': {
+                'n': [128, 256, 128, 64, 128, 256],
+                's': [256, 512, 256, 128, 256, 512],
+                'm': [384, 576, 384, 192, 384, 576],
+                'l': [512, 512, 512, 256, 512, 512],
+                'x': [640, 640, 640, 320, 640, 640],
+                'layers': ['6', '8', '12', '15', '18', '21']
+            }
+        }
 
-        # v11 student_version에 따른 채널 설정
-        if student_version == 'v11n':
-            channels_s = [128, 256, 128, 64, 128, 256]
-        elif student_version == 'v11s':
-            channels_s = [256, 512, 256, 128, 256, 512]
-        elif student_version == 'v11m':
-            channels_s = [512, 512, 512, 256, 512, 512]
-        elif student_version == 'v11l':
-            channels_s = [512, 512, 512, 256, 512, 512]
-        elif student_version == 'v11x':
-            channels_s = [768, 768, 768, 384, 768, 768]
-        else:
-            channels_s = [128, 256, 128, 64, 128, 256]
+        # Teacher와 Student 버전 선택
+        teacher_base, teacher_size = teacher_version[:3], teacher_version[3:]  # 예: v11, n
+        student_base, student_size = student_version[:3], student_version[3:]  # 예: v8, s
 
-        # v8 teacher_version에 따른 채널 설정
-        if teacher_version == 'v8n':
-            channels_t = [128, 256, 128, 64, 128, 256]
-        elif teacher_version == 'v8s':
-            channels_t = [256, 512, 256, 128, 256, 512]
-        elif teacher_version == 'v8m':
-            channels_t = [384, 576, 384, 192, 384, 576]
-        elif teacher_version == 'v8l':
-            channels_t = [512, 512, 512, 256, 512, 512]
-        elif teacher_version == 'v8x':
-            channels_t = [640, 640, 640, 320, 640, 640]
-        else:
-            channels_t = [512, 512, 512, 256, 512, 512]
+        # 채널 설정
+        channels_t = channels_map.get(teacher_base, {}).get(teacher_size, [512, 512, 512, 256, 512, 512])
+        channels_s = channels_map.get(student_base, {}).get(student_size, [128, 256, 128, 64, 128, 256])
 
-        # v8 student_version에 따른 채널 설정
-        if student_version == 'v8n':
-            channels_s = [128, 256, 128, 64, 128, 256]
-        elif student_version == 'v8s':
-            channels_s = [256, 512, 256, 128, 256, 512]
-        elif student_version == 'v8m':
-            channels_s = [384, 576, 384, 192, 384, 576]
-        elif student_version == 'v8l':
-            channels_s = [512, 512, 512, 256, 512, 512]
-        elif student_version == 'v8x':
-            channels_s = [640, 640, 640, 320, 640, 640]
-        else:
-            channels_s = [128, 256, 128, 64, 128, 256]
+        if teacher_base == 'v11':
+            layers = channels_map.get(teacher_base, {}).get('layers')
+        elif student_base == 'v8':
+            layers = channels_map.get(student_base, {}).get('layers')
 
         self.D_loss_fn = FeatureLoss(channels_s=channels_s, channels_t=channels_t)
 
@@ -260,59 +249,71 @@ class Distillation_loss:
         self.student_module_pairs = []
         self.remove_handle = []
 
-        if student_version in ['v11n', 'v11s', 'v11m', 'v11l', 'v11x'] or teacher_version in ['v11n', 'v11s', 'v11m', 'v11l', 'v11x']:
-            layers = ['6', '8', '13', '16', '19', '22']
-        if student_version in ['v8n', 'v8s', 'v8m', 'v8l', 'v8x'] or teacher_version in ['v8n', 'v8s', 'v8m', 'v8l', 'v8x']:
-            layers = ['6', '8', '12', '15', '18', '21']
+        print('layers : ', layers)
 
-        for mname, ml in modelL.named_modules():
-            if mname is not None:
-                name = mname.split(".")
-                if name[0] == "module":
-                    name.pop(0)
-                if len(name) == 4:
-                    if name[2] in layers:
-                        if "cv2" in mname:
-                            self.teacher_module_pairs.append(ml)
+        # Usage
+        self.teacher_module_pairs = extract_module_pairs(modelL, layers, role='teacher')
+        self.student_module_pairs = extract_module_pairs(modeln, layers, role='student')
 
-        for mname, ml in modeln.named_modules():
-            if mname is not None:
-                name = mname.split(".")
-                if name[0] == "module":
-                    name.pop(0)
-                if len(name) == 4:
-                    if name[2] in layers:
-                        if "cv2" in mname:
-                            self.student_module_pairs.append(ml)
+        # print('teacher module : ', len(self.teacher_module_pairs))
+        # print('student module : ', len(self.student_module_pairs))
 
-        print('teacher module : ', self.teacher_module_pairs)
-        print('student module : ', self.student_module_pairs)
+        # print('teacher module : ', self.teacher_module_pairs)
+        # print('student module : ', self.student_module_pairs)
 
     def register_hook(self):
         self.teacher_outputs = []
         self.origin_outputs = []
 
-        def make_layer_forward_hook(l):
+        def make_student_layer_forward_hook(output_list):
             def forward_hook(m, input, output):
-                l.append(output)
+                output_list.append(output)
+
+            return forward_hook
+
+        def make_teacher_layer_forward_hook(output_list):
+            def forward_hook(m, input, output):
+                output_list.append(output)
 
             return forward_hook
 
         for ml, ori in zip(self.teacher_module_pairs, self.student_module_pairs):
-            # 각 레이어에 Hook을 추가하면 Forward를 수행할 때 각 레이어의 기능이 자동으로 model_outputs 및 Origin_outputs로 전송됩니다.
-            self.remove_handle.append(ml.register_forward_hook(make_layer_forward_hook(self.teacher_outputs)))
-            self.remove_handle.append(ori.register_forward_hook(make_layer_forward_hook(self.origin_outputs)))
+            print(f"type of ml: {type(ml)}, type of ori: {type(ori)}")
+            self.remove_handle.append(ml.register_forward_hook(make_teacher_layer_forward_hook(self.teacher_outputs)))
+            self.remove_handle.append(ori.register_forward_hook(make_student_layer_forward_hook(self.origin_outputs)))
 
     def get_loss(self):
         quant_loss = 0
         # for index, (mo, fo) in enumerate(zip(self.teacher_outputs, self.origin_outputs)):
         #     print(mo.shape,fo.shape)
         # quant_loss += self.D_loss_fn(mo, fo)
+
+        # print('test1 : ',len(self.teacher_outputs))
+        # print('test2 : ',len(self.origin_outputs))
+
+        if not self.teacher_outputs or not self.origin_outputs:
+            # print('없음')
+            print(
+                f"Warning: output not defined outputs - Teacher: {len(self.teacher_outputs)}, Student: {len(self.origin_outputs)}")
+            self.teacher_outputs.clear()
+            self.origin_outputs.clear()
+            return torch.tensor(0.0, requires_grad=True), False
+
+        if len(self.teacher_outputs) != len(self.origin_outputs):
+            print(
+                f"Warning: Mismatched outputs - Teacher: {len(self.teacher_outputs)}, Student: {len(self.origin_outputs)}")
+            self.teacher_outputs.clear()
+            self.origin_outputs.clear()
+            return torch.tensor(0.0, requires_grad=True), False
+
+        if len(self.teacher_outputs) > 6:
+            self.teacher_outputs = self.teacher_outputs[6:]
+
         quant_loss += self.D_loss_fn(y_t=self.teacher_outputs, y_s=self.origin_outputs)
 
         self.teacher_outputs.clear()
         self.origin_outputs.clear()
-        return quant_loss
+        return quant_loss, True
 
     def remove_handle_(self):
         for rm in self.remove_handle:
@@ -629,10 +630,10 @@ class BaseTrainer:
         epoch = self.start_epoch
         self.optimizer.zero_grad()  # zero any resumed gradients to ensure stability on train start
 
-        if self.Distillation is not None:
-            distillation_loss.register_hook()
-
         while True:
+            if self.Distillation is not None:
+                distillation_loss.register_hook()
+
             self.epoch = epoch
             self.run_callbacks("on_train_epoch_start")
             with warnings.catch_warnings():
@@ -679,23 +680,25 @@ class BaseTrainer:
 
                     if self.Distillation is not None:
                         distill_weight = ((1 - math.cos(i * math.pi / len(self.train_loader))) / 2) * (0.1 - 1) + 1
-                        # with torch.no_grad():
-                        #     pred = self.Distillation(batch['img'], verbose=False)
+                        with torch.no_grad():
+                            pred = self.Distillation(batch['img'], verbose=False)
 
-                        self.d_loss = distillation_loss.get_loss()
+                        self.d_loss, distil_status = distillation_loss.get_loss()
 
-                        # if distillation_loss.distiller == "MGDLoss":
-                        #     self.d_loss += distillation_loss.D_loss_fn(pred,preds,layer="outlayer")
-                        # elif distillation_loss.distiller == "CWDLoss":
-                        #     pass
-                        # # self.d_loss *= 10
-                        # self.d_loss += distillation_loss.D_loss_fn(pred,preds)
-
-                        self.d_loss *= distill_weight
-                        if i == 0:
-                            print(self.d_loss)
-                            print(self.loss)
-                        self.loss += self.d_loss
+                        if distil_status:
+                            # if distillation_loss.distiller == "MGDLoss":
+                            #     self.d_loss += distillation_loss.D_loss_fn(pred,preds,layer="outlayer")
+                            # elif distillation_loss.distiller == "CWDLoss":
+                            #     pass
+                            # # self.d_loss *= 10
+                            # self.d_loss += distillation_loss.D_loss_fn(pred,preds)
+                            self.d_loss *= distill_weight
+                            if i == 0:
+                                print(self.d_loss)
+                                print(self.loss)
+                            self.loss += self.d_loss
+                        else:
+                            print('missmatch forward hook')
 
                 # Backward
                 self.scaler.scale(self.loss).backward()

@@ -24,7 +24,8 @@ def train():
     parser.add_argument('--student_batch', type=int, default=8, help="Batch size for training.")
     parser.add_argument('--student_model', type=str, default='yolo11n.pt', help="Path to the student YOLO model file.")
 
-    parser.add_argument('--distill_layers', type=str, default='[6, 8, 13, 16, 19, 22]', help="layers for distillation")
+    parser.add_argument('--distill_layers', type=str, default='[6, 8, 13, 16, 19, 22]', help="Layers for distillation")
+    parser.add_argument('--distill_loss', type=str, default='mgd', help="Loss for distillation")
 
     args = parser.parse_args()
 
@@ -40,7 +41,8 @@ def train():
             device=args.teacher_device,
             batch=args.teacher_batch,
             Distillation=None,
-            distill_layers=None
+            distill_layers=None,
+            distill_loss=None
         )
 
         torch.cuda.empty_cache()
@@ -59,7 +61,8 @@ def train():
             device=args.student_device,
             batch=args.student_batch,
             Distillation=teacher_model,
-            distill_layers=args.distill_layers
+            distill_layers=args.distill_layers,
+            distill_loss=args.distill_loss
         )
 
     if not args.teacher_train and not args.student_train:

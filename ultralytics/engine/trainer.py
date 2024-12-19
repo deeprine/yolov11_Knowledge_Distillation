@@ -145,7 +145,10 @@ class MGDLoss(nn.Module):
         mat = torch.rand((N, 1, H, W)).to(device)
         mat = torch.where(mat > 1 - self.lambda_mgd, 0, 1).to(device)
 
+        # print('preds_S : ', preds_S.shape)
         masked_fea = torch.mul(preds_S, mat)
+        # print('masked_fee : ', masked_fea.shape)
+        # print(self.generation[idx])
         new_fea = self.generation[idx](masked_fea)
 
         dis_loss = loss_mse(new_fea, preds_T) / N
@@ -154,9 +157,10 @@ class MGDLoss(nn.Module):
 
 
 class FeatureLoss(nn.Module):
-    def __init__(self, channels_s, channels_t, distiller='cwd', loss_weight=1.0):
+    def __init__(self, channels_s, channels_t, distiller='mgd', loss_weight=1.0):
         super(FeatureLoss, self).__init__()
         self.loss_weight = loss_weight
+        self.distiller = distiller
 
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.align_module = nn.ModuleList([
@@ -168,6 +172,8 @@ class FeatureLoss(nn.Module):
             for tea_channel in channels_t
         ]
 
+        # print('channels_s_num : ', channels_s)
+        # print('channels_T_num : ', channels_t)
         if distiller == 'mgd':
             self.feature_loss = MGDLoss(channels_s, channels_t)
         elif distiller == 'cwd':
@@ -181,9 +187,10 @@ class FeatureLoss(nn.Module):
         stu_feats = []
 
         for idx, (s, t) in enumerate(zip(y_s, y_t)):
-            s = self.align_module[idx](s)
-            s = self.norm[idx](s)
-            t = self.norm[idx](t)
+            if self.distiller == 'cwd':
+                s = self.align_module[idx](s)
+                s = self.norm[idx](s)
+                t = self.norm[idx](t)
             tea_feats.append(t)
             stu_feats.append(s)
 
@@ -221,7 +228,7 @@ def extract_module_pairs(model, layers, role):
     return module_pairs
 
 class Distillation_loss:
-    def __init__(self, modeln, modelL, distill_layers, distiller="CWDLoss"):  # model must be de-paralleled
+    def __init__(self, modeln, modelL, distill_layers, distiller="mgd"):  # model must be de-paralleled
 
         self.distiller = distiller
         self.remove_handle = []
@@ -230,7 +237,7 @@ class Distillation_loss:
         # Usage
         channels_t = extract_module_channels(modelL, self.distill_layers, role='teacher')
         channels_s = extract_module_channels(modeln, self.distill_layers, role='student')
-        self.D_loss_fn = FeatureLoss(channels_s=channels_s, channels_t=channels_t)
+        self.D_loss_fn = FeatureLoss(channels_s=channels_s, channels_t=channels_t, distiller=distiller)
 
         # Usage
         self.teacher_module_pairs = extract_module_pairs(modelL, self.distill_layers, role='teacher')
@@ -241,8 +248,8 @@ class Distillation_loss:
         print('teacher module : ', len(self.teacher_module_pairs))
         print('student module : ', len(self.student_module_pairs))
 
-        # print('teacher module : ', self.teacher_module_pairs)
-        # print('student module : ', self.student_module_pairs)
+        print('teacher module : ', self.teacher_module_pairs)
+        print('student module : ', self.student_module_pairs)
 
     def register_hook(self):
         self.teacher_outputs = []
@@ -357,6 +364,10 @@ class BaseTrainer:
         self.distill_layers = overrides["distill_layers"]
         print('self.distill_layers  : ', self.distill_layers)
         overrides.pop("distill_layers")
+
+        self.distill_loss = overrides["distill_loss"]
+        print('self.distill_loss  : ', self.distill_loss)
+        overrides.pop("distill_loss")
 
         self.args = get_cfg(cfg, overrides)
         self.check_resume(overrides)
@@ -608,7 +619,7 @@ class BaseTrainer:
             self.plot_idx.extend([base_idx, base_idx + 1, base_idx + 2])
 
         if self.Distillation is not None:
-            distillation_loss = Distillation_loss(self.model, self.Distillation, self.distill_layers)
+            distillation_loss = Distillation_loss(self.model, self.Distillation, self.distill_layers, distiller=self.distill_loss)
 
         epoch = self.start_epoch
         self.optimizer.zero_grad()  # zero any resumed gradients to ensure stability on train start

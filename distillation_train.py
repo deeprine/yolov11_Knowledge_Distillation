@@ -15,7 +15,6 @@ def train():
     parser.add_argument('--teacher_device', type=str, default='0', help="Device to use for training (e.g., 'cpu' or GPU ID).")
     parser.add_argument('--teacher_batch', type=int, default=8, help="Batch size for training.")
     parser.add_argument('--teacher_model', type=str, default='yolo11l.pt', help="Path to the teacher YOLO model file.")
-    parser.add_argument('--teacher_version', type=str, default='v11l', help="Path to the teacher YOLO teacher version")
 
     parser.add_argument('--student_train', action='store_true', default=False, help="student_train")
     parser.add_argument('--student_data', type=str, required=True, help="Path to the dataset configuration file.")
@@ -24,7 +23,8 @@ def train():
     parser.add_argument('--student_device', type=str, default='0', help="Device to use for training (e.g., 'cpu' or GPU ID).")
     parser.add_argument('--student_batch', type=int, default=8, help="Batch size for training.")
     parser.add_argument('--student_model', type=str, default='yolo11n.pt', help="Path to the student YOLO model file.")
-    parser.add_argument('--student_version', type=str, default='v11n', help="Path to the teacher YOLO student version")
+
+    parser.add_argument('--distill_layers', type=str, default='[6, 8, 13, 16, 19, 22]', help="layers for distillation")
 
     args = parser.parse_args()
 
@@ -40,8 +40,7 @@ def train():
             device=args.teacher_device,
             batch=args.teacher_batch,
             Distillation=None,
-            teacher_version=None,
-            student_version=None
+            distill_layers=None
         )
 
         torch.cuda.empty_cache()
@@ -60,8 +59,7 @@ def train():
             device=args.student_device,
             batch=args.student_batch,
             Distillation=teacher_model,
-            teacher_version=args.teacher_version,
-            student_version=args.student_version
+            distill_layers=args.distill_layers
         )
 
     if not args.teacher_train and not args.student_train:

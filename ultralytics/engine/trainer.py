@@ -190,7 +190,24 @@ class FeatureLoss(nn.Module):
         loss = self.feature_loss(stu_feats, tea_feats)
         return self.loss_weight * loss
 
+def extract_module_channels(model, layers, role):
+    layers = eval(layers)
+    print('channels : ', layers)
+    last_channels = []
+    last_channel = None
+
+    channel_model = model.model.model if role == 'teacher' else model.model
+    for idx, module in enumerate(channel_model):
+        if idx in layers:
+            for name, layer in module.named_modules():
+                if name == 'conv' or name == 'cv1.conv' or name == 'cv2.conv' or name == 'cv3.conv':
+                    last_channel = layer.out_channels
+            last_channels.append(last_channel)
+
+    return last_channels
+
 def extract_module_pairs(model, layers, role):
+    layers = list(map(lambda x : str(x), eval(layers)))
     module_pairs = []
     for mname, ml in model.named_modules():
         if mname is not None:
@@ -204,59 +221,25 @@ def extract_module_pairs(model, layers, role):
     return module_pairs
 
 class Distillation_loss:
-    def __init__(self, modeln, modelL, teacher_version='v11l', student_version='v11n', distiller="CWDLoss"):  # model must be de-paralleled
+    def __init__(self, modeln, modelL, distill_layers, distiller="CWDLoss"):  # model must be de-paralleled
 
         self.distiller = distiller
-        # channels_s=[32,64,128,256,128,64,128,256]
-        # channels_t=[128,256,512,512,512,256,512,512]
-
-        # Teacher와 Student의 채널 설정을 위한 매핑
-        channels_map = {
-            'v11': {
-                'n': [128, 256, 128, 64, 128, 256],
-                's': [256, 512, 256, 128, 256, 512],
-                'm': [512, 512, 512, 256, 512, 512],
-                'l': [512, 512, 512, 256, 512, 512],
-                'x': [768, 768, 768, 384, 768, 768],
-                'layers': ['6', '8', '13', '16', '19', '22']
-            },
-            'v8': {
-                'n': [128, 256, 128, 64, 128, 256],
-                's': [256, 512, 256, 128, 256, 512],
-                'm': [384, 576, 384, 192, 384, 576],
-                'l': [512, 512, 512, 256, 512, 512],
-                'x': [640, 640, 640, 320, 640, 640],
-                'layers': ['6', '8', '12', '15', '18', '21']
-            }
-        }
-
-        # Teacher와 Student 버전 선택
-        teacher_base, teacher_size = teacher_version[:3], teacher_version[3:]  # 예: v11, n
-        student_base, student_size = student_version[:3], student_version[3:]  # 예: v8, s
-
-        # 채널 설정
-        channels_t = channels_map.get(teacher_base, {}).get(teacher_size, [512, 512, 512, 256, 512, 512])
-        channels_s = channels_map.get(student_base, {}).get(student_size, [128, 256, 128, 64, 128, 256])
-
-        if teacher_base == 'v11':
-            layers = channels_map.get(teacher_base, {}).get('layers')
-        elif student_base == 'v8':
-            layers = channels_map.get(student_base, {}).get('layers')
-
-        self.D_loss_fn = FeatureLoss(channels_s=channels_s, channels_t=channels_t)
-
-        self.teacher_module_pairs = []
-        self.student_module_pairs = []
         self.remove_handle = []
-
-        print('layers : ', layers)
+        self.distill_layers = distill_layers
 
         # Usage
-        self.teacher_module_pairs = extract_module_pairs(modelL, layers, role='teacher')
-        self.student_module_pairs = extract_module_pairs(modeln, layers, role='student')
+        channels_t = extract_module_channels(modelL, self.distill_layers, role='teacher')
+        channels_s = extract_module_channels(modeln, self.distill_layers, role='student')
+        self.D_loss_fn = FeatureLoss(channels_s=channels_s, channels_t=channels_t)
 
-        # print('teacher module : ', len(self.teacher_module_pairs))
-        # print('student module : ', len(self.student_module_pairs))
+        # Usage
+        self.teacher_module_pairs = extract_module_pairs(modelL, self.distill_layers, role='teacher')
+        self.student_module_pairs = extract_module_pairs(modeln, self.distill_layers, role='student')
+
+        print('channels_t : ', channels_t)
+        print('channels_s : ', channels_s)
+        print('teacher module : ', len(self.teacher_module_pairs))
+        print('student module : ', len(self.student_module_pairs))
 
         # print('teacher module : ', self.teacher_module_pairs)
         # print('student module : ', self.student_module_pairs)
@@ -278,7 +261,6 @@ class Distillation_loss:
             return forward_hook
 
         for ml, ori in zip(self.teacher_module_pairs, self.student_module_pairs):
-            print(f"type of ml: {type(ml)}, type of ori: {type(ori)}")
             self.remove_handle.append(ml.register_forward_hook(make_teacher_layer_forward_hook(self.teacher_outputs)))
             self.remove_handle.append(ori.register_forward_hook(make_student_layer_forward_hook(self.origin_outputs)))
 
@@ -306,8 +288,13 @@ class Distillation_loss:
             self.origin_outputs.clear()
             return torch.tensor(0.0, requires_grad=True), False
 
-        if len(self.teacher_outputs) > 6:
-            self.teacher_outputs = self.teacher_outputs[6:]
+        # print(len(self.teacher_outputs), len(self.distill_layers))
+
+        # if len(self.teacher_outputs) != len(self.distill_layers):
+        #     diff_outputs = len(self.teacher_outputs) - len(self.distill_layers)
+
+        if len(self.teacher_outputs) > len(self.distill_layers):
+            self.teacher_outputs = self.teacher_outputs[len(self.distill_layers):]
 
         quant_loss += self.D_loss_fn(y_t=self.teacher_outputs, y_s=self.origin_outputs)
 
@@ -367,13 +354,9 @@ class BaseTrainer:
         print('self.Distillation : ', self.Distillation)
         overrides.pop("Distillation")
 
-        self.teacher_version = overrides["teacher_version"]
-        print('self.teacher_version  : ', self.teacher_version )
-        overrides.pop("teacher_version")
-
-        self.student_version = overrides["student_version"]
-        print('self.student_version  : ', self.student_version )
-        overrides.pop("student_version")
+        self.distill_layers = overrides["distill_layers"]
+        print('self.distill_layers  : ', self.distill_layers)
+        overrides.pop("distill_layers")
 
         self.args = get_cfg(cfg, overrides)
         self.check_resume(overrides)
@@ -625,7 +608,7 @@ class BaseTrainer:
             self.plot_idx.extend([base_idx, base_idx + 1, base_idx + 2])
 
         if self.Distillation is not None:
-            distillation_loss = Distillation_loss(self.model,self.Distillation,self.teacher_version,self.student_version)
+            distillation_loss = Distillation_loss(self.model, self.Distillation, self.distill_layers)
 
         epoch = self.start_epoch
         self.optimizer.zero_grad()  # zero any resumed gradients to ensure stability on train start

@@ -1,6 +1,6 @@
 # yolov11_knowledge_distillation
 
-This code applies knowledge distillation to YOLOv11 from [ultralytics](https://github.com/ultralytics/ultralytics) using MGDLoss.
+This code applies knowledge distillation to YOLOv11 from [ultralytics](https://github.com/ultralytics/ultralytics) using MGDLoss or CWDLoss.
 
 ## Reference
 - This project is forked from [ultralytics](https://github.com/ultralytics/ultralytics)

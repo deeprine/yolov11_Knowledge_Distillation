@@ -2,15 +2,15 @@
 
 # Default parameters
 TEACHER_TRAIN=false # or false
-TEACHER_DATA="/home/leeyongseong/nas_folder/kisa/yolo_datasets/kisa_yolo_싸움데이터셋/data.yaml" # data yaml path
+TEACHER_DATA="" # data yaml path
 TEACHER_EPOCHS=100
 TEACHER_IMGSZ=640
 TEACHER_DEVICE="0"
 TEACHER_BATCH=8
-TEACHER_MODEL="/home/leeyongseong/PycharmProjects/yolov11_knowledge_distillation/runs/detect/train24/weights/last.pt" # yolov8n,s,m,l,x / yolo11n,s,m,l,x
+TEACHER_MODEL="" # yolov8n,s,m,l,x / yolo11n,s,m,l,x
 
 STUDENT_TRAIN=true # or false
-STUDENT_DATA="/home/leeyongseong/nas_folder/kisa/yolo_datasets/kisa_yolo_싸움데이터셋/data.yaml" # data yaml path
+STUDENT_DATA="" # data yaml path
 STUDENT_EPOCHS=300
 STUDENT_IMGSZ=640
 STUDENT_DEVICE="0"

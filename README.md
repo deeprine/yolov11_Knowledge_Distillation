@@ -1,5 +1,8 @@
 # yolov11_knowledge_distillation
 
+## MGD(https://arxiv.org/abs/2205.01529)
+![mgdloss.png](./images/mgdloss.png)
+
 This code applies knowledge distillation to YOLOv11 from [ultralytics](https://github.com/ultralytics/ultralytics) using MGDLoss or CWDLoss.
 
 ## Reference
